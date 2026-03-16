@@ -429,7 +429,6 @@ export default function App() {
       ? attachments.map(att => ({
           media_type: att.mediaType,
           data: att.dataUrl.replace(/^data:[^;]+;base64,/, ''),
-          url: att.name,
         }))
       : undefined
 
