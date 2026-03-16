@@ -1,10 +1,86 @@
-import { app, BrowserWindow, shell, Menu, ipcMain } from 'electron'
+import { app, BrowserWindow, shell, Menu, ipcMain, Tray, nativeImage } from 'electron'
 import { join } from 'path'
 import { homedir } from 'os'
 import { readFileSync, existsSync, mkdirSync, writeFileSync } from 'fs'
 import crypto from 'node:crypto'
 
 let mainWindow: BrowserWindow | null = null
+let tray: Tray | null = null
+const gotTheLock = app.requestSingleInstanceLock()
+
+if (!gotTheLock) {
+  app.quit()
+}
+
+// When a second instance is launched, focus the existing window
+app.on('second-instance', () => {
+  if (mainWindow) {
+    if (mainWindow.isMinimized()) mainWindow.restore()
+    if (!mainWindow.isVisible()) mainWindow.show()
+    mainWindow.focus()
+  }
+})
+
+function buildTray(): void {
+  // Build a small 16x16 tray icon from the app icon
+  let iconPath: string
+  if (process.env.ELECTRON_RENDERER_URL) {
+    // Dev mode
+    iconPath = join(process.cwd(), 'build', 'icon.png')
+  } else {
+    // Production: look in resources
+    iconPath = join(process.resourcesPath, 'icon.png')
+  }
+
+  let trayIcon: Electron.NativeImage
+  if (existsSync(iconPath)) {
+    trayIcon = nativeImage.createFromPath(iconPath).resize({ width: 16, height: 16 })
+  } else {
+    // Fallback: generate a minimal 16x16 red circle
+    const size = 16
+    const buf = Buffer.alloc(4 + size * size * 4) // PNG header is more complex, use a simple approach
+    // Just use a blank native image as last resort
+    trayIcon = nativeImage.createEmpty()
+  }
+
+  tray = new Tray(trayIcon)
+  tray.setToolTip('Claw Desktop')
+
+  const contextMenu = Menu.buildFromTemplate([
+    { label: 'Claw Desktop', enabled: false },
+    { type: 'separator' },
+    {
+      label: 'Show Window',
+      click: () => {
+        if (mainWindow) {
+          if (mainWindow.isMinimized()) mainWindow.restore()
+          if (!mainWindow.isVisible()) mainWindow.show()
+          mainWindow.focus()
+        }
+      },
+    },
+    { type: 'separator' },
+    {
+      label: 'Quit',
+      click: () => {
+        // Force quit, don't hide to tray
+        forceQuit = true
+        app.quit()
+      },
+    },
+  ])
+  tray.setContextMenu(contextMenu)
+
+  tray.on('double-click', () => {
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore()
+      if (!mainWindow.isVisible()) mainWindow.show()
+      mainWindow.focus()
+    }
+  })
+}
+
+let forceQuit = false
 
 function buildMenu(): void {
   const isMac = process.platform === 'darwin'
@@ -110,12 +186,20 @@ function createWindow(): void {
       preload: join(__dirname, '../preload/index.js'),
       sandbox: false,
       contextIsolation: true,
-      nodeIntegration: false
-    }
+      nodeIntegration: false,
+    },
   })
 
   mainWindow.on('ready-to-show', () => {
     mainWindow?.show()
+  })
+
+  // Minimize to tray instead of closing
+  mainWindow.on('close', (e) => {
+    if (!forceQuit) {
+      e.preventDefault()
+      mainWindow?.hide()
+    }
   })
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
@@ -139,7 +223,10 @@ ipcMain.on('window-maximize', () => {
     mainWindow?.maximize()
   }
 })
-ipcMain.on('window-close', () => mainWindow?.close())
+ipcMain.on('window-close', () => {
+  // Hide to tray instead of closing
+  mainWindow?.hide()
+})
 ipcMain.handle('window-is-maximized', () => mainWindow?.isMaximized() ?? false)
 
 // Read OpenClaw config from ~/.openclaw/openclaw.json (JSON5)
@@ -161,15 +248,21 @@ ipcMain.handle('read-openclaw-config', () => {
     const gateway = cfg?.gateway ?? {}
     const auth = gateway.auth ?? {}
     const port = gateway.port ?? 18789
-    const bind = gateway.bind ?? '127.0.0.1'
+    const rawBind = gateway.bind ?? '127.0.0.1'
+
+    // Normalize bind address: loopback/localhost/0.0.0.0 → 127.0.0.1
+    let bind = rawBind
+    if (bind === 'loopback' || bind === 'localhost') bind = '127.0.0.1'
+    else if (bind === '0.0.0.0') bind = '127.0.0.1'
 
     return {
-      url: `http://${bind === '0.0.0.0' ? '127.0.0.1' : bind}:${port}`,
+      url: `http://${bind}:${port}`,
       authMode: auth.mode === 'password' ? 'password' : 'token',
       token: typeof auth.token === 'string' ? auth.token : '',
       password: typeof auth.password === 'string' ? auth.password : '',
     }
-  } catch {
+  } catch (e) {
+    console.error('[openclaw-config] failed to read/parse config:', e)
     return null
   }
 })
@@ -230,6 +323,7 @@ ipcMain.handle('device-sign', (_e, { privateKey, payload }: { privateKey: string
 })
 
 app.whenReady().then(() => {
+  buildTray()
   createWindow()
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
@@ -239,7 +333,6 @@ app.whenReady().then(() => {
 })
 
 app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') {
-    app.quit()
-  }
+  // Don't quit on window close — keep running in tray
+  // The user must use "Quit" from tray context menu to exit
 })

@@ -47,24 +47,57 @@ export default function InputArea({ onSend, onAbort, disabled, running }: Props)
     fileInputRef.current?.click()
   }
 
+  const addFileAttachment = (file: File) => {
+    if (attachments.length >= 4) return
+    const reader = new FileReader()
+    reader.onload = () => {
+      const dataUrl = reader.result as string
+      setAttachments(prev => [...prev, {
+        dataUrl,
+        mediaType: file.type || 'application/octet-stream',
+        name: file.name,
+        source: 'file',
+      }])
+    }
+    reader.readAsDataURL(file)
+  }
+
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files
     if (!files) return
     for (const file of Array.from(files)) {
-      if (attachments.length >= 4) break // max 4 attachments
-      const reader = new FileReader()
-      reader.onload = () => {
-        const dataUrl = reader.result as string
-        setAttachments(prev => [...prev, {
-          dataUrl,
-          mediaType: file.type,
-          name: file.name,
-        }])
-      }
-      reader.readAsDataURL(file)
+      addFileAttachment(file)
     }
-    // Reset input so same file can be selected again
     e.target.value = ''
+  }
+
+  const addClipboardImage = (dataUrl: string, mediaType: string) => {
+    if (attachments.length >= 4) return
+    const ts = Date.now().toString(36)
+    setAttachments(prev => [...prev, {
+      dataUrl,
+      mediaType,
+      name: `clipboard-${ts}.png`,
+      source: 'clipboard',
+    }])
+  }
+
+  // Handle paste — extract images from clipboard
+  const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const items = e.clipboardData?.items
+    if (!items) return
+    for (const item of Array.from(items)) {
+      if (item.type.startsWith('image/')) {
+        e.preventDefault()
+        const blob = item.getAsFile()
+        if (!blob) continue
+        const reader = new FileReader()
+        reader.onload = () => {
+          addClipboardImage(reader.result as string, blob.type)
+        }
+        reader.readAsDataURL(blob)
+      }
+    }
   }
 
   const removeAttachment = (index: number) => {
@@ -138,6 +171,7 @@ export default function InputArea({ onSend, onAbort, disabled, running }: Props)
               value={text}
               onChange={e => setText(e.target.value)}
               onKeyDown={handleKeyDown}
+              onPaste={handlePaste}
               placeholder={disabled ? t('input.disabled') : running ? t('input.running') : t('input.placeholder')}
               disabled={disabled}
               rows={1}

@@ -29,6 +29,7 @@ export interface Attachment {
   dataUrl: string
   mediaType: string
   name: string
+  source: 'file' | 'clipboard'
 }
 
 /* ---- Tool stream ---- */

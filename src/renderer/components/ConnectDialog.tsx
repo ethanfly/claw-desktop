@@ -35,12 +35,13 @@ export default function ConnectDialog({ config, onConnect, connecting, error }: 
     if (!read) return
     read().then(res => {
       if (!res) return
-      setUrl(res.url)
-      setAuthMode(res.authMode)
-      setToken(res.token)
-      setPassword(res.password)
+      console.log('[connect] loaded openclaw config:', { url: res.url, authMode: res.authMode, hasToken: !!res.token, hasPassword: !!res.password })
+      setUrl(res.url || url)
+      setAuthMode(res.authMode || authMode)
+      if (res.token) setToken(res.token)
+      if (res.password) setPassword(res.password)
       setConfigSource('openclaw')
-    }).catch(() => {})
+    }).catch((e) => console.warn('[connect] failed to read openclaw config:', e))
   }, [])
 
   const handleSubmit = (e: React.FormEvent) => {

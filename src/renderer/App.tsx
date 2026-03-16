@@ -402,18 +402,11 @@ export default function App() {
     const runId = crypto.randomUUID()
     runIdRef.current = runId
 
-    // Build content blocks from text + attachments
-    const content: ContentBlock[] = []
-    for (const att of attachments) {
-      content.push({
-        type: 'image',
-        source: {
-          type: 'base64',
-          media_type: att.mediaType,
-          data: att.dataUrl.replace(/^data:[^;]+;base64,/, ''),
-        },
-      })
-    }
+    // Build content blocks for display and gateway
+    const content: ContentBlock[] = attachments.map(att => ({
+      type: 'image' as const,
+      source: { type: 'base64', media_type: att.mediaType, data: att.dataUrl },
+    }))
     if (text.trim()) {
       content.push({ type: 'text', text })
     }
@@ -431,8 +424,17 @@ export default function App() {
     setToolEntries([])
     setRunStatus({ running: true, runId, startedAt: Date.now() })
 
+    // Build image params for gateway
+    const images = attachments.length > 0
+      ? attachments.map(att => ({
+          media_type: att.mediaType,
+          data: att.dataUrl.replace(/^data:[^;]+;base64,/, ''),
+          url: att.name,
+        }))
+      : undefined
+
     try {
-      await client.sendMessage(sessionRef.current, text, runId)
+      await client.sendMessage(sessionRef.current, text, runId, images)
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
       setMessages(prev => [...prev, {

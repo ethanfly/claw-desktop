@@ -152,10 +152,14 @@ export class GatewayClient {
     return this.request('chat.history', { sessionKey, limit })
   }
 
-  sendMessage(sessionKey: string, message: string, runId: string): Promise<void> {
-    return this.request('chat.send', {
+  sendMessage(sessionKey: string, message: string, runId: string, images?: Array<{ media_type: string; data: string; url?: string }>): Promise<void> {
+    const params: Record<string, unknown> = {
       sessionKey, message, deliver: false, idempotencyKey: runId,
-    })
+    }
+    if (images && images.length > 0) {
+      params.images = images
+    }
+    return this.request('chat.send', params)
   }
 
   abortRun(sessionKey: string, runId: string): Promise<void> {
@@ -289,13 +293,7 @@ export class GatewayClient {
   private _startKeepalive() {
     this._stopKeepalive()
     this._resetTickMiss()
-    this.keepaliveTimer = setInterval(() => {
-      if (!this.ws || this.ws.readyState !== WebSocket.OPEN || this.closed) {
-        this._stopKeepalive()
-        return
-      }
-      this.request('sessions.list', { activeMinutes: 0 }).catch(() => {})
-    }, Math.max(this.tickIntervalMs * 2, 30_000))
+    // Only start the tick-miss timer; no keepalive ping that could flood the gateway
   }
 
   private _stopKeepalive() {
@@ -305,12 +303,16 @@ export class GatewayClient {
 
   private _resetTickMiss() {
     if (this.tickMissTimer) clearTimeout(this.tickMissTimer)
+    // Generous timeout: if no tick for 5 minutes, consider the connection stale.
+    // The gateway may not always send ticks, so don't aggressively reconnect.
     this.tickMissTimer = setTimeout(() => {
       if (this._connected && !this.closed) {
-        console.warn('[gateway] tick missed — connection may be stale, reconnecting')
-        this.ws?.close()
+        console.warn('[gateway] tick missed for 5 min — sending a ping to check liveness')
+        this.request('sessions.list', { activeMinutes: 0 }).catch(() => {
+          // If the ping fails, the WebSocket close event will handle reconnection
+        })
       }
-    }, this.tickIntervalMs * 2 + 10_000)
+    }, 5 * 60_000)
   }
 
   private _onMsg(raw: string) {
