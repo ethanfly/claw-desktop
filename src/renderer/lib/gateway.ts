@@ -152,17 +152,14 @@ export class GatewayClient {
     return this.request('chat.history', { sessionKey, limit })
   }
 
-  sendMessage(sessionKey: string, message: string, runId: string, images?: Array<{ media_type: string; data: string }>): Promise<void> {
-    // Embed images as JSON content blocks string within the message
-    let msg = message
-    if (images && images.length > 0) {
-      const blocks = [
-        ...images.map(img => ({ type: 'image' as const, source: { type: 'base64' as const, media_type: img.media_type, data: img.data } })),
-        ...(message.trim() ? [{ type: 'text' as const, text: message }] : []),
-      ]
-      msg = JSON.stringify(blocks)
+  sendMessage(sessionKey: string, message: string, runId: string, attachments?: Array<{ type?: string; mimeType?: string; fileName?: string; content: string }>): Promise<void> {
+    const params: Record<string, unknown> = {
+      sessionKey, message, deliver: false, idempotencyKey: runId,
     }
-    return this.request('chat.send', { sessionKey, message: msg, deliver: false, idempotencyKey: runId })
+    if (attachments && attachments.length > 0) {
+      params.attachments = attachments
+    }
+    return this.request('chat.send', params)
   }
 
   abortRun(sessionKey: string, runId: string): Promise<void> {

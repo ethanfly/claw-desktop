@@ -424,16 +424,18 @@ export default function App() {
     setToolEntries([])
     setRunStatus({ running: true, runId, startedAt: Date.now() })
 
-    // Build image params for gateway
-    const images = attachments.length > 0
+    // Build attachments for gateway (OpenClaw format: { type, mimeType, fileName, content })
+    const gatewayAttachments = attachments.length > 0
       ? attachments.map(att => ({
-          media_type: att.mediaType,
-          data: att.dataUrl.replace(/^data:[^;]+;base64,/, ''),
+          type: 'image',
+          mimeType: att.mediaType,
+          fileName: att.name,
+          content: att.dataUrl,
         }))
       : undefined
 
     try {
-      await client.sendMessage(sessionRef.current, text, runId, images)
+      await client.sendMessage(sessionRef.current, text, runId, gatewayAttachments)
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
       setMessages(prev => [...prev, {
