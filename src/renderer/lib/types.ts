@@ -23,6 +23,8 @@ export type ContentBlock =
   | { type: 'tool_call'; name: string; arguments?: unknown }
   | { type: 'tool_result'; name: string; text?: string; output?: string }
   | { type: 'image'; source?: { type?: string; media_type?: string; data?: string } }
+  | { type: 'file'; name: string; media_type: string; data: string }
+  | { type: 'file'; name: string; mediaType: string; dataUrl: string }
 
 /* ---- Attachment ---- */
 export interface Attachment {

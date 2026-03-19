@@ -7,6 +7,32 @@ import ThinkingBlock from './ThinkingBlock'
 import AgentAvatar from './AgentAvatar'
 import ImagePreview from './ImagePreview'
 
+function FileDownloadCard({ name, mediaType, dataUrl }: { name: string; mediaType: string; dataUrl: string }) {
+  const handleDownload = () => {
+    const a = document.createElement('a')
+    a.href = dataUrl
+    a.download = name
+    a.click()
+  }
+
+  return (
+    <div className="flex items-center gap-3 bg-dark-600 rounded-xl px-4 py-3 max-w-sm hover:bg-dark-500 transition-colors cursor-pointer" onClick={handleDownload}>
+      <div className="shrink-0 w-10 h-10 rounded-lg bg-dark-500 flex items-center justify-center">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-dark-300">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+          <polyline points="14 2 14 8 20 8" />
+          <line x1="12" y1="18" x2="12" y2="12" />
+          <polyline points="9 15 12 18 15 15" />
+        </svg>
+      </div>
+      <div className="flex-1 min-w-0">
+        <p className="text-sm text-dark-50 font-medium truncate">{name}</p>
+        <p className="text-xs text-dark-400 truncate">{mediaType}</p>
+      </div>
+    </div>
+  )
+}
+
 interface Props {
   message: ChatMessage
   showThinking: boolean
@@ -58,12 +84,31 @@ export default function MessageBubble({ message, showThinking }: Props) {
   const isUser = message.role === 'user'
   const thinkingBlocks = message.content.filter(b => b.type === 'thinking')
   const imageBlocks = message.content.filter(b => b.type === 'image')
+  const fileBlocks = message.content.filter((b): b is Extract<ContentBlock, { type: 'file' }> => b.type === 'file')
   const textContent = extractTextFromContent(message.content)
   const hasText = textContent.trim().length > 0
   const hasImages = imageBlocks.length > 0
+  const hasFiles = fileBlocks.length > 0
   const [previewSrc, setPreviewSrc] = useState<string | null>(null)
 
-  if (!isUser && textContent.trim() === 'NO_REPLY' && thinkingBlocks.length === 0 && !hasImages) return null
+  if (!isUser && textContent.trim() === 'NO_REPLY' && thinkingBlocks.length === 0 && !hasImages && !hasFiles) return null
+
+  // Helper to get proper image src - handles both raw base64 and full data URLs
+  const getImageSrc = (block: Extract<ContentBlock, { type: 'image' }>): string | null => {
+    if (!('source' in block) || !block.source) return null
+    const { type, media_type, data } = block.source
+    if (!data) return null
+
+    // If data already has data: prefix, use it directly (avoid double-prefix)
+    if (data.startsWith('data:')) return data
+
+    // Otherwise, construct the data URL from base64
+    if (type === 'base64') {
+      return `data:${media_type ?? 'image/png'};base64,${data}`
+    }
+
+    return data
+  }
 
   return (
     <div className={`flex gap-3 animate-fade-in ${isUser ? 'justify-end' : ''}`}>
@@ -74,14 +119,17 @@ export default function MessageBubble({ message, showThinking }: Props) {
         {showThinking && thinkingBlocks.map((b, i) => (
           <ThinkingBlock key={i} text={'thinking' in b ? b.thinking : ''} />
         ))}
+        {hasFiles && (
+          <div className={`flex gap-2 flex-wrap mb-2 ${isUser ? 'justify-end' : ''}`}>
+            {fileBlocks.map((b, i) => (
+              <FileDownloadCard key={i} name={b.name} mediaType={b.media_type} dataUrl={b.data} />
+            ))}
+          </div>
+        )}
         {hasImages && (
           <div className={`flex gap-2 flex-wrap mb-2 ${isUser ? 'justify-end' : ''}`}>
             {imageBlocks.map((b, i) => {
-              const src = 'source' in b && b.source
-                ? (b.source.type === 'base64' && b.source.data
-                    ? `data:${b.source.media_type ?? 'image/png'};base64,${b.source.data}`
-                    : b.source.data ?? '')
-                : ''
+              const src = getImageSrc(b)
               if (!src) return null
               return (
                 <img

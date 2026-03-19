@@ -50,6 +50,7 @@ function normalizeMessage(msg: unknown): ChatMessage | null {
       if (b.type === 'tool_call' || b.type === 'toolcall') return { type: 'tool_call', name: String(b.name ?? ''), arguments: b.args ?? b.arguments }
       if (b.type === 'tool_result' || b.type === 'toolresult') return { type: 'tool_result', name: String(b.name ?? ''), text: b.text ?? b.output ?? undefined, output: b.output }
       if (b.type === 'image') return { type: 'image', source: b.source }
+      if (b.type === 'file') return { type: 'file', name: String(b.name ?? 'unknown'), media_type: String(b.media_type ?? b.mediaType ?? 'application/octet-stream'), data: String(b.data ?? b.dataUrl ?? '') }
       return { type: 'text', text: String(b.text ?? '') }
     })
   } else {
@@ -452,10 +453,30 @@ export default function App() {
     runIdMapRef.current[key] = runId
     streamingMapRef.current[key] = null
 
-    const content: ContentBlock[] = attachments.map(att => ({
-      type: 'image' as const,
-      source: { type: 'base64', media_type: att.mediaType, data: att.dataUrl },
-    }))
+    // Helper to strip data URL prefix, returning raw base64
+    const stripDataUrl = (dataUrl: string): string => {
+      const match = dataUrl.match(/^data:([^;]+);base64,(.+)$/)
+      return match ? match[2] : dataUrl
+    }
+
+    const content: ContentBlock[] = attachments.map(att => {
+      const isImage = att.mediaType.startsWith('image/')
+      if (isImage) {
+        // For images, store only raw base64 (strip data: prefix)
+        return {
+          type: 'image' as const,
+          source: { type: 'base64', media_type: att.mediaType, data: stripDataUrl(att.dataUrl) },
+        }
+      } else {
+        // For non-image files, store full data URL for download
+        return {
+          type: 'file' as const,
+          name: att.name,
+          media_type: att.mediaType,
+          data: att.dataUrl,
+        }
+      }
+    })
     if (text.trim()) {
       content.push({ type: 'text', text })
     }
