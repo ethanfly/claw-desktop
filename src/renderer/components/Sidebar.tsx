@@ -1,6 +1,7 @@
 import type { SessionInfo } from '../lib/types'
 import { useI18n } from '../lib/i18n'
 import type { Lang } from '../lib/i18n'
+import iconImg from '../public/icon.png'
 
 interface Props {
   sessions: SessionInfo[]
@@ -21,7 +22,7 @@ function sessionLabel(key: string, t: (key: string) => string): string {
   const parts = key.split(':')
   const last = parts[parts.length - 1]
   if (last === 'default') return t('session.main')
-  return `Session ${last?.slice(0, 8) ?? ''}`
+  return last?.slice(0, 8) ?? ''
 }
 
 export default function Sidebar({
@@ -53,11 +54,7 @@ export default function Sidebar({
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-dark-500">
         <div className="flex items-center gap-2">
-          <div className="w-7 h-7 rounded-lg bg-accent/15 flex items-center justify-center">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#7c3aed" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4" /><polyline points="10 17 15 12 10 7" /><line x1="15" y1="12" x2="3" y2="12" />
-            </svg>
-          </div>
+          <img src={iconImg} alt="Claw" className="w-7 h-7 rounded-lg" />
           <span className="font-semibold text-sm text-white">Claw Desktop</span>
         </div>
         <button onClick={onToggleCollapse} title="Collapse sidebar"

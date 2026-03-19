@@ -40,6 +40,7 @@ const strings: Record<Lang, Record<string, string>> = {
     'chat.welcome': 'Welcome to Claw Desktop',
     'chat.welcomeDesc': 'Start a conversation with your OpenClaw agent.',
     'chat.welcomeHint': 'Type a message below to begin.',
+    'chat.refresh': 'Refresh',
 
     // InputArea
     'input.disabled': 'Not connected...',
@@ -104,6 +105,7 @@ const strings: Record<Lang, Record<string, string>> = {
     'chat.welcome': '欢迎使用 Claw Desktop',
     'chat.welcomeDesc': '与你的 OpenClaw 智能体开始对话。',
     'chat.welcomeHint': '在下方输入消息开始。',
+    'chat.refresh': '刷新',
 
     // InputArea
     'input.disabled': '未连接...',

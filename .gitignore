@@ -4,3 +4,9 @@ dist/
 *.log
 .DS_Store
 Thumbs.db
+build/icon.ico
+build/icon.png
+build/icon-transparent.png
+2026-*.png
+generate-icon.mjs
+make-transparent.mjs

@@ -19,6 +19,8 @@ declare global {
   }
 }
 
+import iconImg from '../public/icon.png'
+
 const DRAG: React.CSSProperties = { WebkitAppRegion: 'drag' } as any
 const NO_DRAG: React.CSSProperties = { WebkitAppRegion: 'no-drag' } as any
 
@@ -41,13 +43,7 @@ export default function TitleBar({ connected }: Props) {
       className="flex items-center h-10 bg-dark-800 border-b border-dark-500 shrink-0 select-none"
     >
       <div style={NO_DRAG} className="flex items-center gap-2 pl-3">
-        <div className="w-5 h-5 rounded-md bg-accent/15 flex items-center justify-center">
-          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#7c3aed" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4" />
-            <polyline points="10 17 15 12 10 7" />
-            <line x1="15" y1="12" x2="3" y2="12" />
-          </svg>
-        </div>
+        <img src={iconImg} alt="" className="w-5 h-5 rounded-md" />
         <span className="text-[13px] font-medium text-dark-100 tracking-wide">Claw Desktop</span>
         <div className={`ml-1 w-2 h-2 rounded-full transition-colors ${connected ? 'bg-green-400 glow-dot' : 'bg-dark-400'}`} />
       </div>

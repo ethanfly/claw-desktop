@@ -13,6 +13,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     close: () => ipcRenderer.send('window-close'),
     isMaximized: () => ipcRenderer.invoke('window-is-maximized'),
   },
+  onTrayNewSession: (callback: () => void) => {
+    const handler = () => callback()
+    ipcRenderer.on('tray-new-session', handler)
+    return () => ipcRenderer.removeListener('tray-new-session', handler)
+  },
   readOpenClawConfig: () => ipcRenderer.invoke('read-openclaw-config'),
   getDeviceIdentity: () => ipcRenderer.invoke('device-identity'),
   signDevicePayload: (privateKey: string, payload: string) =>

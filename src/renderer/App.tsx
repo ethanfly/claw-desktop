@@ -106,6 +106,28 @@ function saveConfig(c: GatewayConfig) {
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(c)) } catch { /* ignore */ }
 }
 
+/* ---- per-session state ---- */
+
+interface SessionState {
+  messages: ChatMessage[]
+  streamingText: string | null
+  thinkingText: string | null
+  toolEntries: ToolStreamEntry[]
+  runStatus: RunStatus
+  loading: boolean
+}
+
+function emptySessionState(): SessionState {
+  return {
+    messages: [],
+    streamingText: null,
+    thinkingText: null,
+    toolEntries: [],
+    runStatus: { running: false, runId: null, startedAt: null },
+    loading: false,
+  }
+}
+
 /* ================================================================
    App
    ================================================================ */
@@ -118,15 +140,35 @@ export default function App() {
   const [connecting, setConnecting] = useState(false)
   const [connectError, setConnectError] = useState<string | null>(null)
 
-  /* ---- chat state ---- */
+  /* ---- chat state (per-session) ---- */
+  const handleConnectRef = useRef<ReturnType<typeof handleConnect>>()
+
+  /* ---- auto-connect from openclaw config on startup ---- */
+  useEffect(() => {
+    if (view !== 'connect') return
+    const read = window.electronAPI?.readOpenClawConfig
+    if (!read) return
+    read().then(res => {
+      if (!res || !res.url) return
+      console.log('[app] auto-loading openclaw config:', { url: res.url, authMode: res.authMode, hasToken: !!res.token })
+      if (handleConnectRef.current) {
+        handleConnectRef.current({ url: res.url, authMode: res.authMode, token: res.token, password: res.password })
+      }
+    }).catch(() => { /* show connect dialog */ })
+  }, [view])
+
+  /* ---- tray new session shortcut ---- */
+  useEffect(() => {
+    if (view !== 'chat') return
+    const off = window.electronAPI?.onTrayNewSession?.(() => {
+      handleNewSession()
+    })
+    return () => off?.()
+  }, [view])
+
   const [sessions, setSessions] = useState<SessionInfo[]>([])
   const [currentSession, setCurrentSession] = useState('agent:main:main:default')
-  const [messages, setMessages] = useState<ChatMessage[]>([])
-  const [streamingText, setStreamingText] = useState<string | null>(null)
-  const [toolEntries, setToolEntries] = useState<ToolStreamEntry[]>([])
-  const [thinkingText, setThinkingText] = useState<string | null>(null)
-  const [runStatus, setRunStatus] = useState<RunStatus>({ running: false, runId: null, startedAt: null })
-  const [loading, setLoading] = useState(false)
+  const [sessionStates, setSessionStates] = useState<Record<string, SessionState>>({})
 
   /* ---- UI toggles ---- */
   const [showThinking, setShowThinking] = useState(() => {
@@ -146,18 +188,27 @@ export default function App() {
 
   useEffect(() => { localStorage.setItem('claw-lang', lang) }, [lang])
 
-  /* ---- refs for event handlers ---- */
+  /* ---- refs ---- */
   const clientRef = useRef<GatewayClient | null>(null)
   const sessionRef = useRef(currentSession)
-  const streamingRef = useRef(streamingText)
-  const runIdRef = useRef<string | null>(null)
+  const runIdMapRef = useRef<Record<string, string>>({})
+  const streamingMapRef = useRef<Record<string, string>>({})
 
   useEffect(() => { sessionRef.current = currentSession }, [currentSession])
-  useEffect(() => { streamingRef.current = streamingText }, [streamingText])
 
   /* ---- persist toggles ---- */
   useEffect(() => { localStorage.setItem('claw-show-thinking', String(showThinking)) }, [showThinking])
   useEffect(() => { localStorage.setItem('claw-show-tools', String(showTools)) }, [showTools])
+
+  /* ---- helpers to update per-session state ---- */
+  const updateSession = useCallback((key: string, updater: (prev: SessionState) => SessionState) => {
+    setSessionStates(prev => {
+      const cur = prev[key] ?? emptySessionState()
+      return { ...prev, [key]: updater(cur) }
+    })
+  }, [])
+
+  const current = sessionStates[currentSession] ?? emptySessionState()
 
   /* ---- load sessions from gateway ---- */
   const refreshSessions = useCallback(async (client: GatewayClient) => {
@@ -176,17 +227,20 @@ export default function App() {
 
   /* ---- load chat history ---- */
   const loadHistory = useCallback(async (client: GatewayClient, sessionKey: string) => {
-    setLoading(true)
+    updateSession(sessionKey, s => ({ ...s, loading: true }))
     try {
       const res = await client.loadHistory(sessionKey)
       const raw: unknown[] = Array.isArray(res.messages) ? res.messages : []
-      setMessages(raw.filter(m => !isSilent(m)).map(normalizeMessage).filter((m): m is ChatMessage => m !== null))
+      updateSession(sessionKey, s => ({
+        ...s,
+        messages: raw.filter(m => !isSilent(m)).map(normalizeMessage).filter((m): m is ChatMessage => m !== null),
+        loading: false,
+      }))
     } catch (e) {
       console.error('Failed to load history:', e)
-    } finally {
-      setLoading(false)
+      updateSession(sessionKey, s => ({ ...s, loading: false }))
     }
-  }, [])
+  }, [updateSession])
 
   /* ---- connect ---- */
   const handleConnect = useCallback((cfg: GatewayConfig) => {
@@ -203,12 +257,10 @@ export default function App() {
       setConnecting(false)
       setConnectError(null)
       setView('chat')
-      // Reset stale run state from before disconnect
-      setRunStatus({ running: false, runId: null, startedAt: null, activeTool: null })
-      setStreamingText(null)
-      setThinkingText(null)
-      setToolEntries([])
-      runIdRef.current = null
+      // Reset all session states
+      setSessionStates({})
+      runIdMapRef.current = {}
+      streamingMapRef.current = {}
       await loadHistory(client, sessionRef.current)
       refreshSessions(client)
     })
@@ -221,88 +273,83 @@ export default function App() {
 
     client.on('chat', (payload) => {
       const p = payload as ChatEventPayload
-      if (p.sessionKey && p.sessionKey !== sessionRef.current) return
+      // Route events by sessionKey
+      const key = p.sessionKey || sessionRef.current
+      const streaming = streamingMapRef.current[key] ?? null
 
       if (p.state === 'delta') {
         const text = extractText(p.message)
         if (text && !SILENT.test(text)) {
-          const cur = streamingRef.current ?? ''
+          const cur = streaming
           if (!cur || text.length >= cur.length) {
-            setStreamingText(text)
+            streamingMapRef.current[key] = text
+            updateSession(key, s => ({ ...s, streamingText: text }))
           }
         }
         const think = extractThinking(p.message)
-        if (think) setThinkingText(think)
+        if (think) {
+          updateSession(key, s => ({ ...s, thinkingText: (s.thinkingText ?? '') + think }))
+        }
       } else if (p.state === 'final') {
         const norm = normalizeMessage(p.message)
+        const partial = streamingMapRef.current[key]
         if (norm && !isSilent(p.message)) {
-          setMessages(prev => [...prev, norm])
-        } else if (streamingRef.current && !SILENT.test(streamingRef.current)) {
-          setMessages(prev => [...prev, {
-            role: 'assistant',
-            content: [{ type: 'text', text: streamingRef.current! }],
-            timestamp: Date.now(),
-          }])
+          updateSession(key, s => ({ ...s, messages: [...s.messages, norm] }))
+        } else if (partial && !SILENT.test(partial)) {
+          updateSession(key, s => ({ ...s, messages: [...s.messages, { role: 'assistant', content: [{ type: 'text', text: partial }], timestamp: Date.now() }] }))
         }
-        setStreamingText(null)
-        setThinkingText(null)
-        setToolEntries([])
-        setRunStatus({ running: false, runId: null, startedAt: null, activeTool: null })
-        runIdRef.current = null
-        // Refresh sessions after run completes
+        streamingMapRef.current[key] = null
+        delete runIdMapRef.current[key]
+        updateSession(key, s => ({ ...s, streamingText: null, thinkingText: null, toolEntries: [], runStatus: { running: false, runId: null, startedAt: null, activeTool: null } }))
         refreshSessions(client)
       } else if (p.state === 'aborted') {
-        const partial = streamingRef.current
+        const partial = streamingMapRef.current[key]
         if (partial && !SILENT.test(partial)) {
-          setMessages(prev => [...prev, {
-            role: 'assistant',
-            content: [{ type: 'text', text: partial }],
-            timestamp: Date.now(),
-          }])
+          updateSession(key, s => ({
+            ...s,
+            messages: [...s.messages, { role: 'assistant', content: [{ type: 'text', text: partial }], timestamp: Date.now() }],
+          }))
         }
         const norm = normalizeMessage(p.message)
         if (norm && !isSilent(p.message)) {
-          // Replace the partial message with the normalized one if available
-          setMessages(prev => {
-            const updated = [...prev]
-            // If the last message was the partial we just added, replace it
+          updateSession(key, s => {
+            const updated = [...s.messages]
             const lastIdx = updated.length - 1
             if (lastIdx >= 0 && updated[lastIdx].role === 'assistant' && !updated[lastIdx].id) {
               updated[lastIdx] = norm
             } else {
               updated.push(norm)
             }
-            return updated
+            return { ...s, messages: updated }
           })
         }
-        setStreamingText(null)
-        setThinkingText(null)
-        setToolEntries([])
-        setRunStatus({ running: false, runId: null, startedAt: null, activeTool: null })
-        runIdRef.current = null
+        streamingMapRef.current[key] = null
+        delete runIdMapRef.current[key]
+        updateSession(key, s => ({ ...s, streamingText: null, thinkingText: null, toolEntries: [], runStatus: { running: false, runId: null, startedAt: null, activeTool: null } }))
       } else if (p.state === 'error') {
-        setMessages(prev => [...prev, {
-          role: 'assistant',
-          content: [{ type: 'text', text: `Error: ${p.errorMessage ?? 'unknown error'}` }],
-          timestamp: Date.now(),
-        }])
-        setStreamingText(null)
-        setThinkingText(null)
-        setToolEntries([])
-        setRunStatus({ running: false, runId: null, startedAt: null, activeTool: null })
-        runIdRef.current = null
+        updateSession(key, s => ({
+          ...s,
+          messages: [...s.messages, { role: 'assistant', content: [{ type: 'text', text: `Error: ${p.errorMessage ?? 'unknown error'}` }], timestamp: Date.now() }],
+          streamingText: null, thinkingText: null, toolEntries: [],
+          runStatus: { running: false, runId: null, startedAt: null, activeTool: null },
+        }))
+        streamingMapRef.current[key] = null
+        delete runIdMapRef.current[key]
       }
     })
 
     client.on('agent', (payload) => {
       const p = payload as AgentEventPayload
-      if (p.sessionKey && p.sessionKey !== sessionRef.current) return
-      if (!runIdRef.current) return
+      const key = p.sessionKey || sessionRef.current
+      const runId = runIdMapRef.current[key]
+      if (!runId) return
 
       // Thinking stream
       if (p.stream === 'thinking') {
         const text = typeof p.data?.text === 'string' ? p.data.text : null
-        if (text) setThinkingText(prev => (prev ?? '') + text)
+        if (text) {
+          updateSession(key, s => ({ ...s, thinkingText: (s.thinkingText ?? '') + text }))
+        }
         return
       }
 
@@ -320,36 +367,31 @@ export default function App() {
             : undefined
         const now = Date.now()
 
-        setToolEntries(prev => {
-          const existing = prev.find(e => e.toolCallId === toolCallId)
+        updateSession(key, s => {
+          const existing = s.toolEntries.find(e => e.toolCallId === toolCallId)
+          let newEntries: ToolStreamEntry[]
           if (!existing) {
-            // Commit streaming text segment before new tool
-            setStreamingText(cur => {
-              if (cur && cur.trim()) {
-                // text is committed implicitly (already shown above)
-              }
-              return cur
-            })
-            return [...prev, {
+            newEntries = [...s.toolEntries, {
               toolCallId, runId: p.runId, sessionKey: p.sessionKey,
               name, args, output: output || undefined,
               startedAt: typeof p.ts === 'number' ? p.ts : now,
               updatedAt: now, phase: phase as ToolStreamEntry['phase'],
             }]
+          } else {
+            newEntries = s.toolEntries.map(e => {
+              if (e.toolCallId !== toolCallId) return e
+              return { ...e, name, args: args ?? e.args, output: output ?? e.output, updatedAt: now, phase: phase as ToolStreamEntry['phase'] }
+            })
           }
-          return prev.map(e => {
-            if (e.toolCallId !== toolCallId) return e
-            return { ...e, name, args: args ?? e.args, output: output ?? e.output, updatedAt: now, phase: phase as ToolStreamEntry['phase'] }
-          })
+          return { ...s, toolEntries: newEntries }
         })
 
-        // Update active tool for indicator
         if (phase === 'start') {
-          setRunStatus(prev => ({ ...prev, activeTool: name }))
+          updateSession(key, s => ({ ...s, runStatus: { ...s.runStatus, activeTool: name } }))
         } else if (phase === 'result') {
-          setRunStatus(prev => {
-            const stillActive = prev.activeTool === name
-            return stillActive ? { ...prev, activeTool: null } : prev
+          updateSession(key, s => {
+            const stillActive = s.runStatus.activeTool === name
+            return { ...s, runStatus: stillActive ? { ...s.runStatus, activeTool: null } : s.runStatus }
           })
         }
         return
@@ -359,25 +401,33 @@ export default function App() {
       if (p.stream === 'compaction') {
         const phase = String(p.data?.phase ?? '')
         if (phase === 'start') {
-          setRunStatus(prev => ({ ...prev, activeTool: 'Compacting context...' }))
+          updateSession(key, s => ({ ...s, runStatus: { ...s.runStatus, activeTool: 'Compacting context...' } }))
         } else if (phase === 'end') {
-          setRunStatus(prev => prev.activeTool?.includes('Compacting') ? { ...prev, activeTool: null } : prev)
+          updateSession(key, s => s.runStatus.activeTool?.includes('Compacting') ? { ...s, runStatus: { ...s.runStatus, activeTool: null } } : s)
         }
       }
     })
 
     client.on('close', () => {
       setConnected(false)
-      // Reset run state so UI doesn't stay in loading
-      setRunStatus({ running: false, runId: null, startedAt: null, activeTool: null })
-      setStreamingText(null)
-      setThinkingText(null)
-      setToolEntries([])
-      runIdRef.current = null
+      setSessionStates(prev => {
+        const next: Record<string, SessionState> = {}
+        for (const [k, v] of Object.entries(prev)) {
+          next[k] = {
+            ...v,
+            streamingText: null, thinkingText: null, toolEntries: [],
+            runStatus: { running: false, runId: null, startedAt: null, activeTool: null },
+          }
+        }
+        return next
+      })
+      runIdMapRef.current = {}
+      streamingMapRef.current = {}
     })
 
     client.connect()
-  }, [loadHistory, refreshSessions])
+  }, [loadHistory, refreshSessions, updateSession])
+  handleConnectRef.current = handleConnect
 
   /* ---- disconnect ---- */
   const handleDisconnect = useCallback(() => {
@@ -385,24 +435,23 @@ export default function App() {
     clientRef.current = null
     setConnected(false)
     setView('connect')
-    setMessages([])
-    setStreamingText(null)
-    setToolEntries([])
-    setThinkingText(null)
-    setRunStatus({ running: false, runId: null, startedAt: null })
-    runIdRef.current = null
+    setSessionStates({})
+    runIdMapRef.current = {}
+    streamingMapRef.current = {}
   }, [])
 
   /* ---- send message ---- */
   const handleSend = useCallback(async (text: string, attachments: Attachment[] = []) => {
     const client = clientRef.current
     if (!client || !connected) return
-    if (runStatus.running) return // Block while running
+    const key = sessionRef.current
+    const state = sessionStates[key]
+    if (state?.runStatus.running) return
 
     const runId = crypto.randomUUID()
-    runIdRef.current = runId
+    runIdMapRef.current[key] = runId
+    streamingMapRef.current[key] = null
 
-    // Build content blocks for display and gateway
     const content: ContentBlock[] = attachments.map(att => ({
       type: 'image' as const,
       source: { type: 'base64', media_type: att.mediaType, data: att.dataUrl },
@@ -411,50 +460,41 @@ export default function App() {
       content.push({ type: 'text', text })
     }
 
-    // Optimistically add user message
-    setMessages(prev => [...prev, {
-      role: 'user',
-      content: content.length > 0 ? content : [{ type: 'text', text }],
-      timestamp: Date.now(),
-    }])
+    updateSession(key, s => ({
+      ...s,
+      messages: [...s.messages, { role: 'user', content: content.length > 0 ? content : [{ type: 'text', text }], timestamp: Date.now() }],
+      streamingText: '',
+      thinkingText: null,
+      toolEntries: [],
+      runStatus: { running: true, runId, startedAt: Date.now() },
+    }))
 
-    // Clear streaming state
-    setStreamingText('')
-    setThinkingText(null)
-    setToolEntries([])
-    setRunStatus({ running: true, runId, startedAt: Date.now() })
-
-    // Build attachments for gateway (OpenClaw format: { type, mimeType, fileName, content })
     const gatewayAttachments = attachments.length > 0
-      ? attachments.map(att => ({
-          type: 'image',
-          mimeType: att.mediaType,
-          fileName: att.name,
-          content: att.dataUrl,
-        }))
+      ? attachments.map(att => ({ type: 'image', mimeType: att.mediaType, fileName: att.name, content: att.dataUrl }))
       : undefined
 
     try {
-      await client.sendMessage(sessionRef.current, text, runId, gatewayAttachments)
+      await client.sendMessage(key, text, runId, gatewayAttachments)
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
-      setMessages(prev => [...prev, {
-        role: 'assistant',
-        content: [{ type: 'text', text: `Error: ${msg}` }],
-        timestamp: Date.now(),
-      }])
-      setRunStatus({ running: false, runId: null, startedAt: null })
-      setStreamingText(null)
-      runIdRef.current = null
+      updateSession(key, s => ({
+        ...s,
+        messages: [...s.messages, { role: 'assistant', content: [{ type: 'text', text: `Error: ${msg}` }], timestamp: Date.now() }],
+        runStatus: { running: false, runId: null, startedAt: null },
+        streamingText: null,
+      }))
+      delete runIdMapRef.current[key]
     }
-  }, [connected, runStatus.running])
+  }, [connected, sessionStates, updateSession])
 
   /* ---- abort ---- */
   const handleAbort = useCallback(async () => {
     const client = clientRef.current
-    if (!client || !runIdRef.current) return
+    const key = sessionRef.current
+    const runId = runIdMapRef.current[key]
+    if (!client || !runId) return
     try {
-      await client.abortRun(sessionRef.current, runIdRef.current)
+      await client.abortRun(key, runId)
     } catch (e) {
       console.error('Abort failed:', e)
     }
@@ -462,34 +502,32 @@ export default function App() {
 
   /* ---- new session ---- */
   const handleNewSession = useCallback(() => {
-    if (runStatus.running) return
     const key = `agent:main:main:${crypto.randomUUID().slice(0, 8)}`
     setCurrentSession(key)
     sessionRef.current = key
-    setMessages([])
-    setStreamingText(null)
-    setToolEntries([])
-    setThinkingText(null)
-    runIdRef.current = null
-  }, [runStatus.running])
+    // Don't clear other sessions' states
+  }, [])
 
   /* ---- select session ---- */
   const handleSelectSession = useCallback(async (key: string) => {
-    if (runStatus.running) return
     if (key === sessionRef.current) return
     setCurrentSession(key)
     sessionRef.current = key
-    setMessages([])
-    setStreamingText(null)
-    setToolEntries([])
-    setThinkingText(null)
-    runIdRef.current = null
-
+    // Load history if not cached
     const client = clientRef.current
-    if (client && connected) {
+    if (client && connected && !sessionStates[key]?.messages.length) {
       loadHistory(client, key)
     }
-  }, [connected, runStatus.running, loadHistory])
+  }, [connected, sessionStates, loadHistory])
+
+  /* ---- refresh current session ---- */
+  const handleRefresh = useCallback(async () => {
+    const client = clientRef.current
+    if (client && connected) {
+      await loadHistory(client, sessionRef.current)
+      refreshSessions(client)
+    }
+  }, [connected, loadHistory, refreshSessions])
 
   /* ---- render ---- */
 
@@ -531,17 +569,18 @@ export default function App() {
         onToggleCollapse={() => setSidebarCollapsed(v => !v)}
       />
       <ChatView
-        messages={messages}
-        streamingText={streamingText}
-        toolEntries={toolEntries}
-        thinkingText={thinkingText}
-        runStatus={runStatus}
+        messages={current.messages}
+        streamingText={current.streamingText}
+        toolEntries={current.toolEntries}
+        thinkingText={current.thinkingText}
+        runStatus={current.runStatus}
         showThinking={showThinking}
         showTools={showTools}
         onSend={handleSend}
         onAbort={handleAbort}
+        onRefresh={handleRefresh}
         connected={connected}
-        loading={loading}
+        loading={current.loading}
       />
       </div>
     </div>

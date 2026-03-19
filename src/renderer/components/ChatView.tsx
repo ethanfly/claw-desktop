@@ -3,6 +3,7 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import type { ChatMessage, ToolStreamEntry, RunStatus } from '../lib/types'
 import { useI18n } from '../lib/i18n'
+import iconImg from '../public/icon.png'
 import MessageBubble from './MessageBubble'
 import ToolCard from './ToolCard'
 import ThinkingBlock from './ThinkingBlock'
@@ -19,13 +20,14 @@ interface Props {
   showTools: boolean
   onSend: (message: string) => void
   onAbort: () => void
+  onRefresh: () => void
   connected: boolean
   loading: boolean
 }
 
 export default function ChatView({
   messages, streamingText, toolEntries, thinkingText,
-  runStatus, showThinking, showTools, onSend, onAbort,
+  runStatus, showThinking, showTools, onSend, onAbort, onRefresh,
   connected, loading
 }: Props) {
   const { t } = useI18n()
@@ -45,6 +47,19 @@ export default function ChatView({
 
   return (
     <div className="flex-1 flex flex-col min-w-0 bg-dark-900">
+      {/* Refresh button - fixed above scroll area */}
+      <div className="flex justify-end px-3 py-1.5 bg-dark-900 shrink-0">
+        <button
+          onClick={onRefresh}
+          disabled={runStatus.running || loading}
+          title={t('chat.refresh')}
+          className="p-2 rounded-lg bg-dark-700/80 hover:bg-dark-600 text-dark-300 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed transition-colors backdrop-blur-sm"
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="23 4 23 10 17 10" /><polyline points="1 20 1 14 7 14" /><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+          </svg>
+        </button>
+      </div>
       <div className="flex-1 overflow-y-auto">
         {loading && (
           <div className="flex items-center justify-center py-12">
@@ -55,9 +70,7 @@ export default function ChatView({
         {isEmpty && !loading && (
           <div className="flex flex-col items-center justify-center h-full px-4 text-center">
             <div className="w-14 h-14 rounded-2xl bg-accent/10 border border-accent/15 flex items-center justify-center mb-5 glow-accent">
-              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#7c3aed" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4" /><polyline points="10 17 15 12 10 7" /><line x1="15" y1="12" x2="3" y2="12" />
-              </svg>
+              <img src={iconImg} alt="Claw" className="w-9 h-9" />
             </div>
             <h2 className="text-xl font-semibold text-white mb-2">{t('chat.welcome')}</h2>
             <p className="text-dark-300 text-sm max-w-md">

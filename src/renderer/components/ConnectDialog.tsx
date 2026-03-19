@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import type { GatewayConfig } from '../lib/types'
 import { useI18n } from '../lib/i18n'
+import iconImg from '../public/icon.png'
 
 interface Props {
   config: GatewayConfig
@@ -54,11 +55,7 @@ export default function ConnectDialog({ config, onConnect, connecting, error }: 
       <div className="w-full max-w-md mx-4 animate-fade-in">
         <div className="text-center mb-8">
           <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-accent/10 border border-accent/20 mb-4 glow-accent">
-            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#7c3aed" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4" />
-              <polyline points="10 17 15 12 10 7" />
-              <line x1="15" y1="12" x2="3" y2="12" />
-            </svg>
+            <img src={iconImg} alt="Claw" className="w-10 h-10" />
           </div>
           <h1 className="text-2xl font-bold text-white mb-1">Claw Desktop</h1>
           <p className="text-dark-200 text-sm">{t('connect.title')}</p>

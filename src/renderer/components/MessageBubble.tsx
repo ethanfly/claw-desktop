@@ -5,6 +5,7 @@ import type { ChatMessage, ContentBlock } from '../lib/types'
 import { useI18n } from '../lib/i18n'
 import ThinkingBlock from './ThinkingBlock'
 import AgentAvatar from './AgentAvatar'
+import ImagePreview from './ImagePreview'
 
 interface Props {
   message: ChatMessage
@@ -60,6 +61,7 @@ export default function MessageBubble({ message, showThinking }: Props) {
   const textContent = extractTextFromContent(message.content)
   const hasText = textContent.trim().length > 0
   const hasImages = imageBlocks.length > 0
+  const [previewSrc, setPreviewSrc] = useState<string | null>(null)
 
   if (!isUser && textContent.trim() === 'NO_REPLY' && thinkingBlocks.length === 0 && !hasImages) return null
 
@@ -86,8 +88,8 @@ export default function MessageBubble({ message, showThinking }: Props) {
                   key={i}
                   src={src}
                   alt={`attachment-${i}`}
-                  className="max-w-xs max-h-64 rounded-xl object-cover cursor-pointer hover:opacity-90 transition-opacity"
-                  onClick={() => window.open(src, '_blank')}
+                  className="max-w-xs max-h-64 rounded-xl object-cover cursor-pointer hover:opacity-90 transition-opacity shadow-lg hover:shadow-xl hover:scale-[1.02] transform duration-200"
+                  onClick={() => setPreviewSrc(src)}
                 />
               )
             })}
@@ -101,7 +103,23 @@ export default function MessageBubble({ message, showThinking }: Props) {
               <p className="whitespace-pre-wrap break-words">{textContent}</p>
             ) : (
               <div className="markdown-body">
-                <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ code: CodeBlock as any }}>{textContent}</ReactMarkdown>
+                <ReactMarkdown
+                  remarkPlugins={[remarkGfm]}
+                  components={{
+                    code: CodeBlock as any,
+                    img: ({ src, alt, ...props }: any) => (
+                      <img
+                        {...props}
+                        src={src}
+                        alt={alt}
+                        className="max-w-full max-h-80 rounded-xl object-cover cursor-pointer hover:opacity-90 transition-opacity shadow-lg"
+                        onClick={() => src && setPreviewSrc(src)}
+                      />
+                    ),
+                  }}
+                >
+                  {textContent}
+                </ReactMarkdown>
               </div>
             )}
           </div>
@@ -110,6 +128,7 @@ export default function MessageBubble({ message, showThinking }: Props) {
       {isUser && (
         <div className="shrink-0 w-7 h-7 mt-0.5 rounded-lg bg-dark-500 flex items-center justify-center text-dark-100 text-xs font-bold">U</div>
       )}
+      <ImagePreview src={previewSrc ?? ''} visible={!!previewSrc} onClose={() => setPreviewSrc(null)} />
     </div>
   )
 }

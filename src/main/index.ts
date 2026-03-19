@@ -21,6 +21,12 @@ app.on('second-instance', () => {
   }
 })
 
+/* ---- tray i18n ---- */
+function isSystemChinese(): boolean {
+  const lang = process.env.LANG || process.env.LC_ALL || process.env.LC_MESSAGES || app.getLocale()
+  return lang.toLowerCase().startsWith('zh')
+}
+
 function buildTray(): void {
   // Build a small 16x16 tray icon from the app icon
   let iconPath: string
@@ -36,21 +42,28 @@ function buildTray(): void {
   if (existsSync(iconPath)) {
     trayIcon = nativeImage.createFromPath(iconPath).resize({ width: 16, height: 16 })
   } else {
-    // Fallback: generate a minimal 16x16 red circle
+    // Fallback: generate a minimal 16x16 purple circle
     const size = 16
-    const buf = Buffer.alloc(4 + size * size * 4) // PNG header is more complex, use a simple approach
-    // Just use a blank native image as last resort
-    trayIcon = nativeImage.createEmpty()
+    const buf = Buffer.alloc(size * size * 4)
+    for (let i = 0; i < size * size; i++) {
+      buf[i * 4] = 0x7c     // R
+      buf[i * 4 + 1] = 0x3a // G
+      buf[i * 4 + 2] = 0xed // B (#7c3aed)
+      buf[i * 4 + 3] = 255  // A
+    }
+    trayIcon = nativeImage.createFromBuffer(buf, { width: size, height: size })
   }
 
   tray = new Tray(trayIcon)
-  tray.setToolTip('Claw Desktop')
+
+  const zh = isSystemChinese()
+  tray.setToolTip(zh ? 'Claw Desktop - 桌面客户端' : 'Claw Desktop')
 
   const contextMenu = Menu.buildFromTemplate([
     { label: 'Claw Desktop', enabled: false },
     { type: 'separator' },
     {
-      label: 'Show Window',
+      label: zh ? '显示窗口' : 'Show Window',
       click: () => {
         if (mainWindow) {
           if (mainWindow.isMinimized()) mainWindow.restore()
@@ -59,11 +72,21 @@ function buildTray(): void {
         }
       },
     },
+    {
+      label: zh ? '新建会话' : 'New Session',
+      click: () => {
+        if (mainWindow) {
+          if (mainWindow.isMinimized()) mainWindow.restore()
+          if (!mainWindow.isVisible()) mainWindow.show()
+          mainWindow.focus()
+          mainWindow.webContents.send('tray-new-session')
+        }
+      },
+    },
     { type: 'separator' },
     {
-      label: 'Quit',
+      label: zh ? '退出' : 'Quit',
       click: () => {
-        // Force quit, don't hide to tray
         forceQuit = true
         app.quit()
       },
@@ -182,6 +205,7 @@ function createWindow(): void {
     backgroundColor: '#0f0f0f',
     show: false,
     frame: false,
+    icon: join(__dirname, '../../resources/icon.png'),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       sandbox: false,
