@@ -1,4 +1,4 @@
-import { app, BrowserWindow, shell, Menu, ipcMain, Tray, nativeImage } from 'electron'
+import { app, BrowserWindow, shell, Menu, ipcMain, Tray, nativeImage, globalShortcut } from 'electron'
 import { join } from 'path'
 import { homedir } from 'os'
 import { readFileSync, existsSync, mkdirSync, writeFileSync } from 'fs'
@@ -8,17 +8,20 @@ let mainWindow: BrowserWindow | null = null
 let tray: Tray | null = null
 const gotTheLock = app.requestSingleInstanceLock()
 
+function showMainWindow(): void {
+  if (!mainWindow) return
+  if (mainWindow.isMinimized()) mainWindow.restore()
+  if (!mainWindow.isVisible()) mainWindow.show()
+  mainWindow.focus()
+}
+
 if (!gotTheLock) {
   app.quit()
 }
 
 // When a second instance is launched, focus the existing window
 app.on('second-instance', () => {
-  if (mainWindow) {
-    if (mainWindow.isMinimized()) mainWindow.restore()
-    if (!mainWindow.isVisible()) mainWindow.show()
-    mainWindow.focus()
-  }
+  showMainWindow()
 })
 
 /* ---- tray i18n ---- */
@@ -63,7 +66,7 @@ function buildTray(): void {
     { label: 'Claw Desktop', enabled: false },
     { type: 'separator' },
     {
-      label: zh ? '显示窗口' : 'Show Window',
+      label: zh ? '显示窗口 (Ctrl+Alt+C)' : 'Show Window (Ctrl+Alt+C)',
       click: () => {
         if (mainWindow) {
           if (mainWindow.isMinimized()) mainWindow.restore()
@@ -75,12 +78,8 @@ function buildTray(): void {
     {
       label: zh ? '新建会话' : 'New Session',
       click: () => {
-        if (mainWindow) {
-          if (mainWindow.isMinimized()) mainWindow.restore()
-          if (!mainWindow.isVisible()) mainWindow.show()
-          mainWindow.focus()
-          mainWindow.webContents.send('tray-new-session')
-        }
+        showMainWindow()
+        mainWindow?.webContents.send('tray-new-session')
       },
     },
     { type: 'separator' },
@@ -95,11 +94,7 @@ function buildTray(): void {
   tray.setContextMenu(contextMenu)
 
   tray.on('double-click', () => {
-    if (mainWindow) {
-      if (mainWindow.isMinimized()) mainWindow.restore()
-      if (!mainWindow.isVisible()) mainWindow.show()
-      mainWindow.focus()
-    }
+    showMainWindow()
   })
 }
 
@@ -349,6 +344,17 @@ ipcMain.handle('device-sign', (_e, { privateKey, payload }: { privateKey: string
 app.whenReady().then(() => {
   buildTray()
   createWindow()
+
+  // Boss key: Ctrl+Alt+C to toggle/show window
+  globalShortcut.register('Ctrl+Alt+C', () => {
+    if (!mainWindow) return
+    if (mainWindow.isVisible() && mainWindow.isFocused()) {
+      mainWindow.hide()
+    } else {
+      showMainWindow()
+    }
+  })
+
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       createWindow()
