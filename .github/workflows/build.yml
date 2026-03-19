@@ -1,0 +1,84 @@
+name: Build & Release
+
+on:
+  push:
+    branches: [master]
+    tags: ['v*']
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Bump version (push to master)
+        if: github.event_name == 'push' && !startsWith(github.ref, 'refs/tags/')
+        run: |
+          # Read current version, bump patch
+          $version = (Get-Content package.json | ConvertFrom-Json).version
+          $parts = $version -split '\.'
+          $parts[2] = [int]$parts[2] + 1
+          $newVersion = $parts -join '.'
+          
+          # Update package.json
+          $pkg = Get-Content package.json | ConvertFrom-Json
+          $pkg.version = $newVersion
+          $pkg | ConvertTo-Json -Depth 10 | Set-Content package.json
+          
+          # Update electron-builder config
+          $pkg = Get-Content package.json -Raw
+          $pkg = $pkg -replace 'Claw Desktop Setup [\d.]+', "Claw Desktop Setup $newVersion"
+          Set-Content package.json $pkg
+          
+          Write-Output "NEW_VERSION=$newVersion" >> $env:GITHUB_ENV
+          Write-Output "Bumped version: $version -> $newVersion"
+
+      - name: Commit version bump
+        if: github.event_name == 'push' && !startsWith(github.ref, 'refs/tags/')
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package.json
+          git diff --staged --quiet || (git commit -m "chore: bump version to $env:NEW_VERSION" && git push)
+
+      - name: Build application
+        run: npm run dist
+
+      - name: Create tag & release
+        if: github.event_name == 'push' && !startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ env.NEW_VERSION }}
+          name: v${{ env.NEW_VERSION }}
+          body: |
+            ## Claw Desktop v${{ env.NEW_VERSION }}
+            
+            ### Changes
+            Auto-built from commit `${{ github.sha }}`
+            
+            ### Download
+            - `Claw Desktop Setup ${{ env.NEW_VERSION }}.exe` — Windows installer
+          files: |
+            dist/*.exe
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload artifact (tag trigger)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.exe
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
