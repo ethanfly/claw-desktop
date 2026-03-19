@@ -15,7 +15,7 @@
     "productName": "Claw Desktop",
     "win": {
       "target": "nsis",
-      "icon": "build/icon.ico"
+      "icon": "resources/icon.ico"
     },
     "nsis": {
       "oneClick": false,
@@ -28,7 +28,7 @@
     ],
     "extraResources": [
       {
-        "from": "build/icon.png",
+        "from": "resources/icon.png",
         "to": "icon.png"
       }
     ]
