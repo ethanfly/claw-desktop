@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="build/icon-transparent.png" width="120" alt="Claw Desktop">
+<img src="resources/icon.png" width="120" alt="Claw Desktop">
 
 # Claw Desktop
 

@@ -49,6 +49,10 @@ function normalizeMessage(msg: unknown): ChatMessage | null {
       if (b.type === 'thinking') return { type: 'thinking', thinking: String(b.thinking ?? b.text ?? '') }
       if (b.type === 'tool_call' || b.type === 'toolcall') return { type: 'tool_call', name: String(b.name ?? ''), arguments: b.args ?? b.arguments }
       if (b.type === 'tool_result' || b.type === 'toolresult') return { type: 'tool_result', name: String(b.name ?? ''), text: b.text ?? b.output ?? undefined, output: b.output }
+      if (b.type === 'image_url' && typeof b.image_url === 'object' && b.image_url?.url) {
+        const url = typeof b.image_url.url === 'string' ? b.image_url.url : ''
+        return { type: 'image', source: { type: 'url', data: url } }
+      }
       if (b.type === 'image') return { type: 'image', source: b.source }
       if (b.type === 'file') return { type: 'file', name: String(b.name ?? 'unknown'), media_type: String(b.media_type ?? b.mediaType ?? 'application/octet-stream'), data: String(b.data ?? b.dataUrl ?? '') }
       return { type: 'text', text: String(b.text ?? '') }

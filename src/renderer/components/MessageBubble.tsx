@@ -102,6 +102,9 @@ export default function MessageBubble({ message, showThinking }: Props) {
     // If data already has data: prefix, use it directly (avoid double-prefix)
     if (data.startsWith('data:')) return data
 
+    // If source type is url (e.g., from image_url blocks), use directly
+    if (type === 'url') return data
+
     // Otherwise, construct the data URL from base64
     if (type === 'base64') {
       return `data:${media_type ?? 'image/png'};base64,${data}`
